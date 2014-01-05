@@ -45,7 +45,7 @@ import org.apache.commons.io.FilenameUtils;
 public class Cappuccino extends HttpServlet {
 
     private final String host_name = "localhost:8080";
-    
+
     private final String db_user = "root";
     private final String db_name = "cappuccino";
 
@@ -209,12 +209,15 @@ public class Cappuccino extends HttpServlet {
         }
         String email = request.getParameter("email");
         String service_name = request.getParameter("service_name");
+        System.out.println(email);
+        System.out.println(service_name);
         boolean result = addServiceToDB(email, service_name);
         if (result) {
             sendResponse("success", 200, response);
         } else {
             sendResponse("failed", 400, response);
         }
+
     }
 
     private void registerImage(HttpServletRequest request, HttpServletResponse response) {
@@ -234,10 +237,10 @@ public class Cappuccino extends HttpServlet {
             while (data.hasMoreElements()) {
                 System.out.println(data.nextElement());
             }
-            String email = request.getParameter("email");
-            String service_name = request.getParameter("service_name");
+            String email = getFormByName("email", request);
+            String service_name = getFormByName("service_name", request);
             int service_id = 0;
-            ResultSet service = queryDB("SELECT id from services where email=" + email + " and service_name=" + service_name);
+            ResultSet service = queryDB("SELECT id from services where email='" + email + "' and service_name='" + service_name+"'");
             service_id = service.getInt("id");
             Calendar cal = Calendar.getInstance();
             long timestamp = cal.getTime().getTime();
@@ -275,6 +278,8 @@ public class Cappuccino extends HttpServlet {
             sendResponse("failed", 400, response);
         } catch (IOException ex) {
             sendResponse("failed", 400, response);
+        } catch (ServletException ex) {
+            Logger.getLogger(Cappuccino.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
 
@@ -300,7 +305,7 @@ public class Cappuccino extends HttpServlet {
             String html_data = request.getParameter("html");
             String page_name = request.getParameter("page_name");
             int service_id = 0;
-            ResultSet service = queryDB("SELECT id from services where email=" + email + " and service_name=" + service_name);
+            ResultSet service = queryDB("SELECT id from services where email='" + email + "' and service_name='" + service_name+"'");
             service_id = service.getInt("id");
             boolean result = addPageToDB(service_id, html_data, page_name);
             if (result) {
@@ -342,11 +347,13 @@ public class Cappuccino extends HttpServlet {
             Class.forName("org.gjt.mm.mysql.Driver");
             Connection con = DriverManager.getConnection("jdbc:mysql://localhost/" + db_name, db_user, "");
             java.sql.Statement stmt = con.createStatement();
-            String sqlStr = "INSERT into services(service_name,email) VALUES(" + service_name + "," + email + ")";
+            String sqlStr = "INSERT into services(service_name,email) VALUES('" + service_name + "','" + email + "')";
+            System.out.println(sqlStr);
             boolean result = stmt.execute(sqlStr);
             System.out.println(sqlStr + ":" + result);
             return result;
         } catch (ClassNotFoundException | SQLException e) {
+            e.printStackTrace();
             String msg = "ドライバのロードに失敗しました";
             System.out.println(msg);
             return false;
@@ -366,7 +373,7 @@ public class Cappuccino extends HttpServlet {
             Class.forName("org.gjt.mm.mysql.Driver");
             Connection con = DriverManager.getConnection("jdbc:mysql://localhost/" + db_name, db_user, "");
             java.sql.Statement stmt = con.createStatement();
-            String sqlStr = "INSERT into pages(service_id,html,name) VALUES(" + service_id + "," + html_data + "," + page_name + ")";
+            String sqlStr = "INSERT into pages(service_id,html,name) VALUES(" + service_id + ",'" + html_data + "','" + page_name + "')";
             boolean result = stmt.execute(sqlStr);
             System.out.println(sqlStr + ":" + result);
             return result;
@@ -390,7 +397,7 @@ public class Cappuccino extends HttpServlet {
             Class.forName("org.gjt.mm.mysql.Driver");
             Connection con = DriverManager.getConnection("jdbc:mysql://localhost/" + db_name, db_user, "");
             java.sql.Statement stmt = con.createStatement();
-            String sqlStr = "INSERT into images(service_id,path,name) VALUES(" + service_id + "," + path + "," + name + ")";
+            String sqlStr = "INSERT into images(service_id,path,name) VALUES(" + service_id + ",'" + path + "','" + name + "')";
             boolean result = stmt.execute(sqlStr);
             System.out.println(sqlStr + ":" + result);
             return result;
@@ -476,13 +483,13 @@ public class Cappuccino extends HttpServlet {
             service_id = service.getInt("id");
             ResultSet images = queryDB("SELECT name from images whele service_id=" + service_id);
             ArrayList<String> image_urls = new ArrayList<>();
-            while(!images.isAfterLast()){
-                String a_url = "http://"+host_name+"/Cappuccino/"+service_name+"/get_image/"+images.getString("name");
+            while (!images.isAfterLast()) {
+                String a_url = "http://" + host_name + "/Cappuccino/" + service_name + "/get_image/" + images.getString("name");
                 image_urls.add(a_url);
             }
             String data = "";
-            for(String url : image_urls){
-                data = data+url+"\n";
+            for (String url : image_urls) {
+                data = data + url + "\n";
             }
             sendResponse(data, 200, response);
         } catch (SQLException ex) {
@@ -494,9 +501,9 @@ public class Cappuccino extends HttpServlet {
     private void outputHTML(String service_name, String page_name, HttpServletResponse response) {
         try {
             int service_id = 0;
-            ResultSet service = queryDB("SELECT id from services where service_name=" + service_name);
+            ResultSet service = queryDB("SELECT id from services where service_name='" + service_name+"'");
             service_id = service.getInt("id");
-            ResultSet page = queryDB("SELECT html from pages where service_id="+service_id+" and name="+page_name);
+            ResultSet page = queryDB("SELECT html from pages where service_id=" + service_id + " and name='" + page_name+"'");
             String html = page.getString("html");
             System.out.println(html);
             sendResponse(html, 200, response);
@@ -504,6 +511,17 @@ public class Cappuccino extends HttpServlet {
             Logger.getLogger(Cappuccino.class.getName()).log(Level.SEVERE, null, ex);
             sendResponse("Internal Server Error", 500, response);
         }
+    }
+
+    private String getFormByName(String name, HttpServletRequest request) throws ServletException, IOException {
+        InputStream is = request.getPart(name).getInputStream();
+        BufferedReader reader = new BufferedReader(new InputStreamReader(is));
+        String data = "";
+        String line;
+        while ((line = reader.readLine()) != null) {
+            data += line;
+        }
+        return data;
     }
 
 }
