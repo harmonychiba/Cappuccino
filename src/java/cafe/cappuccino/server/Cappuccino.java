@@ -7,16 +7,19 @@ package cafe.cappuccino.server;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -41,9 +44,11 @@ import org.apache.commons.io.FilenameUtils;
 @WebServlet(name = "Cappuccino", urlPatterns = {"/"})
 public class Cappuccino extends HttpServlet {
 
+    private final String host_name = "localhost:8080";
+    
     private final String db_user = "root";
     private final String db_name = "cappuccino";
-    
+
     private final String images_dir = "./cappuccino/images";
 
     /**
@@ -109,6 +114,7 @@ public class Cappuccino extends HttpServlet {
         if (splited.length > index) {
             request_service = splited[index];
         }
+
         index++;
         if (splited.length > index) {
             request_page = splited[index];
@@ -128,7 +134,13 @@ public class Cappuccino extends HttpServlet {
                 query_map.put(key, value);
             }
         }
-
+        if (request_page.equals("image_lists")) {
+            outputImageNamesByServiceName(request_service, response);
+        } else if (request_page.equals("get_image")) {
+            outputImageByName(request_service, request_status, response);
+        } else {
+            outputHTML(request_service, request_page, response);
+        }
         processRequest(request, response, request_service + ":" + request_page + ":" + request_status + "?" + query);
     }
 
@@ -229,41 +241,40 @@ public class Cappuccino extends HttpServlet {
             service_id = service.getInt("id");
             Calendar cal = Calendar.getInstance();
             long timestamp = cal.getTime().getTime();
-            
+
             FileItem file = getUploadedFileByName(request, "image");
             File img_dir = new File(images_dir);
-            if(!img_dir.exists()){
+            if (!img_dir.exists()) {
                 img_dir.mkdirs();
             }
-            File service_img_dir = new File(images_dir+"/service"+service_id);
-            if(!service_img_dir.exists()){
+            File service_img_dir = new File(images_dir + "/service" + service_id);
+            if (!service_img_dir.exists()) {
                 img_dir.mkdir();
             }
-            
-            String filename = images_dir+"/service"+service_id+"/"+timestamp+FilenameUtils.getName(file.getName());
+            String rawfilename = FilenameUtils.getName(file.getName());
+            String filename = images_dir + "/service" + service_id + "/" + timestamp + rawfilename;
             File output = new File(filename);
             FileOutputStream stream = new FileOutputStream(output);
             BufferedInputStream in = new BufferedInputStream(file.getInputStream());
             byte[] buffer = new byte[128];
             int readsize;
-            while((readsize=in.read(buffer)) != -1){
+            while ((readsize = in.read(buffer)) != -1) {
                 stream.write(buffer, 0, readsize);
             }
-            
-            
-            
-            boolean result = addServiceToDB(email, service_name);
+            stream.close();
+
+            boolean result = addImageToDB(service_id, filename, timestamp + rawfilename);
             if (result) {
                 sendResponse("success", 200, response);
             } else {
                 sendResponse("failed", 400, response);
             }
         } catch (SQLException ex) {
-            Logger.getLogger(Cappuccino.class.getName()).log(Level.SEVERE, null, ex);
+            sendResponse("failed", 400, response);
         } catch (FileNotFoundException ex) {
-            Logger.getLogger(Cappuccino.class.getName()).log(Level.SEVERE, null, ex);
+            sendResponse("failed", 400, response);
         } catch (IOException ex) {
-            Logger.getLogger(Cappuccino.class.getName()).log(Level.SEVERE, null, ex);
+            sendResponse("failed", 400, response);
         }
     }
 
@@ -298,7 +309,7 @@ public class Cappuccino extends HttpServlet {
                 sendResponse("failed", 400, response);
             }
         } catch (SQLException ex) {
-            Logger.getLogger(Cappuccino.class.getName()).log(Level.SEVERE, null, ex);
+            sendResponse("failed", 400, response);
         }
     }
 
@@ -308,6 +319,7 @@ public class Cappuccino extends HttpServlet {
             Connection con = DriverManager.getConnection("jdbc:mysql://localhost/" + db_name, db_user, "");
             java.sql.Statement stmt = con.createStatement();
             ResultSet rs = stmt.executeQuery(query);
+            rs.next();
             return rs;
 
         } catch (ClassNotFoundException | SQLException e) {
@@ -364,7 +376,7 @@ public class Cappuccino extends HttpServlet {
             return false;
         }
     }
-    
+
     /*
      DB scheme
      images
@@ -413,13 +425,13 @@ public class Cappuccino extends HttpServlet {
                 if (item.isFormField()) {
                     String fieldname = item.getFieldName();
                     String fieldvalue = item.getString();
-                    if(fieldname.equals(name)){
+                    if (fieldname.equals(name)) {
                         return item;
                     }
                 } else {
                     String fieldname = item.getFieldName();
                     String filename = FilenameUtils.getName(item.getName());
-                    if(fieldname.equals(name)){
+                    if (fieldname.equals(name)) {
                         return item;
                     }
                 }
@@ -428,6 +440,70 @@ public class Cappuccino extends HttpServlet {
             Logger.getLogger(Cappuccino.class.getName()).log(Level.SEVERE, null, ex);
         }
         return null;
+    }
+
+    private void outputImageByName(String service_name, String image_name, HttpServletResponse response) {
+        try {
+            int service_id = 0;
+            ResultSet service = queryDB("SELECT id from services where service_name=" + service_name);
+            service_id = service.getInt("id");
+            ResultSet images = queryDB("SELECT path from images whele name=" + image_name + "and service_id=" + service_id);
+            String path = images.getString("path");
+            File file = new File(path);
+            if (!file.exists()) {
+                sendResponse("failed", 400, response);
+            }
+            response.setContentType("image/jpeg");
+            response.setStatus(200);
+            OutputStream stream = response.getOutputStream();
+            FileInputStream fileIn = new FileInputStream(file);
+            byte[] buffer = new byte[128];
+            int readSize;
+            while ((readSize = fileIn.read(buffer)) != -1) {
+                stream.write(buffer, 0, readSize);
+            }
+            stream.close();
+        } catch (SQLException | IOException ex) {
+            Logger.getLogger(Cappuccino.class.getName()).log(Level.SEVERE, null, ex);
+            sendResponse("failed", 400, response);
+        }
+    }
+
+    private void outputImageNamesByServiceName(String service_name, HttpServletResponse response) {
+        try {
+            int service_id = 0;
+            ResultSet service = queryDB("SELECT id from services where service_name=" + service_name);
+            service_id = service.getInt("id");
+            ResultSet images = queryDB("SELECT name from images whele service_id=" + service_id);
+            ArrayList<String> image_urls = new ArrayList<>();
+            while(!images.isAfterLast()){
+                String a_url = "http://"+host_name+"/Cappuccino/"+service_name+"/get_image/"+images.getString("name");
+                image_urls.add(a_url);
+            }
+            String data = "";
+            for(String url : image_urls){
+                data = data+url+"\n";
+            }
+            sendResponse(data, 200, response);
+        } catch (SQLException ex) {
+            Logger.getLogger(Cappuccino.class.getName()).log(Level.SEVERE, null, ex);
+            sendResponse("failed", 400, response);
+        }
+    }
+
+    private void outputHTML(String service_name, String page_name, HttpServletResponse response) {
+        try {
+            int service_id = 0;
+            ResultSet service = queryDB("SELECT id from services where service_name=" + service_name);
+            service_id = service.getInt("id");
+            ResultSet page = queryDB("SELECT html from pages where service_id="+service_id+" and name="+page_name);
+            String html = page.getString("html");
+            System.out.println(html);
+            sendResponse(html, 200, response);
+        } catch (SQLException ex) {
+            Logger.getLogger(Cappuccino.class.getName()).log(Level.SEVERE, null, ex);
+            sendResponse("Internal Server Error", 500, response);
+        }
     }
 
 }
